@@ -7,11 +7,19 @@ app.get('/', (req, res) => {
 });
 
 app.get("/health", (req, res) => {
+    if (Math.random() < 0.30) {
     
-
-    res.status(200).send("Server A is healthy");
-
-});
+      return;
+    }
+  
+    if (Math.random() < 0.20) {
+      // Simulate server overload
+      setTimeout(() => res.send("OK"), 200);
+      return;
+    }
+  
+    res.send("OK");
+  });
 
 app.listen(port, () => {
     console.log(`Server A listening at http://localhost:${port}`);
