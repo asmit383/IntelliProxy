@@ -6,12 +6,20 @@
   "author": "",
   "type": "commonjs",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "A": "nodemon --watch serverA/serverA.js --exec \"dotenv -e .env.serverA -- node serverA/serverA.js\"",
+  "B": "nodemon --watch serverB/serverB.js --exec \"dotenv -e .env.serverB -- node serverB/serverB.js\"",
+  "proxy": "nodemon --watch proxyserver.js --exec \"node proxyserver.js\"",
+  "all": "concurrently \"npm run A\" \"npm run B\" \"npm run proxy\""
+},
   "dependencies": {
+    "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
     "nodemon": "^3.1.11"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^11.0.0"
   }
 }
