@@ -146,35 +146,75 @@ function pollMetrics(server) {
 }
 setInterval(() => BACKENDS.forEach(pollMetrics), 3000);
 
-// ---- scoring: latency (ms), loss (0..1), errorRate (0..1), activeRequests, queue ----
-function computeScore(server) {
-  const wLatency = 1;   // 1 ms = 1 point
-  const wLoss    = 200; // lossEwma in 0..1 (scale appropriately)
-  const wError   = 50;
-  const wLoad    = 2;   // active requests
-  const wQueue   = 30;  // queue pressure
+function normalize01(x, div) {
+  if (!Number.isFinite(x) || div <= 0) return 0;
+  return Math.tanh(Math.max(0, x / div)); // maps 0..inf -> 0..1 smoothly
+}
 
+function computeScore(server) {
+  
+  const wLatency = 1;   // 1 ms = 1 point
+  const wLoss    = 80;  // reduced from 200 to be less absolute
+  const wError   = 40;
+  const wLoad    = 2;   // active requests
+  const wQueue   = 12;  // queue pressure reduced
+  const wCpu     = 30;  // cpu pressure
+  const wMem     = 12;  // memory pressure
+
+  // --- normalization divisors (tune to your environment) ---
+  const CPU_DIV = 100;                     // 100 ms busy -> ~tanh(1)
+  const MEM_DIV = 200 * 1024 * 1024;       // 200 MB -> ~tanh(1)
+
+  // latency: prefer EWMA
   const latencyPart = Number.isFinite(server.latencyEwma)
     ? server.latencyEwma
     : (Number.isFinite(server.latency) ? server.latency : 10000);
 
+  // loss (0..1), gate until enough pings
   const lossEwma = Number.isFinite(server.lossEwma) ? server.lossEwma : 0;
-  // don't trust loss until we have some pings
   const effectiveLoss = (server.totalPings >= MIN_PINGS) ? lossEwma : 0;
+  const lossContribution = wLoss * Math.min(effectiveLoss, 0.98);
 
-  const lossContribution = wLoss * Math.min(effectiveLoss, 0.95);
+  // error rate (fraction -> percent inside)
   const errorRate = Number.isFinite(server.errorRate) ? server.errorRate : 0;
+  const errorContribution = wError * (errorRate * 100);
 
+  // active requests
+  const loadContribution = wLoad * server.activeRequests;
+
+  // queue (smoothed)
   const queueNorm = Number.isFinite(server.queueEwma) ? Math.tanh(server.queueEwma / 50) : 0;
+  const queueContribution = wQueue * queueNorm;
 
-  return (
-    wLatency * latencyPart +
+  // CPU (normalize cpuBusyMs)
+  const cpuMs = Number.isFinite(server.cpuBusyMs) ? server.cpuBusyMs : 0;
+  const cpuNorm = normalize01(cpuMs, CPU_DIV); // 0..1
+  const cpuContribution = wCpu * cpuNorm;
+
+  // Memory (heapUsed preferred then rss)
+  const mem = Number.isFinite(server.heapUsed) ? server.heapUsed : (Number.isFinite(server.memRss) ? server.memRss : 0);
+  const memNorm = normalize01(mem, MEM_DIV);
+  const memContribution = wMem * memNorm;
+
+  const latencyContribution = wLatency * latencyPart;
+
+  const score =
+    latencyContribution +
     lossContribution +
-    wError * (errorRate * 100) +
-    wLoad * server.activeRequests +
-    wQueue * queueNorm
-  );
+    errorContribution +
+    loadContribution +
+    queueContribution +
+    cpuContribution +
+    memContribution;
+  console.log(
+    `Score ${server.name}: lat=${latencyContribution.toFixed(1)} + loss=${lossContribution.toFixed(1)} + ` +
+    `err=${errorContribution.toFixed(1)} + load=${loadContribution.toFixed(1)} + queue=${queueContribution.toFixed(1)} + ` +
+    `cpu=${cpuContribution.toFixed(1)} + mem=${memContribution.toFixed(1)} = total=${score.toFixed(1)}`
+  );  
+
+  return score;
 }
+
 
 // ---- selection with a SWITCH_THRESHOLD and cooldown to prevent thrash ----
 function getBestBackend() {

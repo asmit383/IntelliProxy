@@ -15,4 +15,4 @@ function hitProxy() {
     console.log("[CLIENT] Error:", err.message);
   });
 }
-setInterval(hitProxy, 1000);
+setInterval(hitProxy, 5000);
