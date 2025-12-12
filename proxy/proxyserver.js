@@ -154,7 +154,7 @@ function normalize01(x, div) {
 function computeScore(server) {
   
   const wLatency = 1;   // 1 ms = 1 point
-  const wLoss    = 80;  // reduced from 200 to be less absolute
+  const wLoss    = 80;  
   const wError   = 40;
   const wLoad    = 2;   // active requests
   const wQueue   = 12;  // queue pressure reduced

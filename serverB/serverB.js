@@ -3,8 +3,6 @@ const express = require("express");
 const os = require("os");
 require('dotenv').config({ path: process.env.DOTENV_PATH || '.env.serverB' });
 
-
-
 const app = express();
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
