@@ -2,6 +2,8 @@
 const express = require("express");
 const http = require("http");
 const { createProxyMiddleware } = require("http-proxy-middleware");
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = 3001;
@@ -219,7 +221,7 @@ class RLAgent {
     }
 
     const f = this.getFeatures(best);
-    console.log(`[RL] Exploit: Selected ${best.name} (Q=${maxQ.toFixed(2)}). Features: lat=${f.latency.toFixed(2)}`);
+    console.log(`[RL] Exploit: Selected ${best.name} (Q=${maxQ.toFixed(2)}). Features:`, JSON.stringify(f));
     return best;
   }
 
@@ -242,9 +244,22 @@ class RLAgent {
 
     console.log(`[RL] Update: ${server.name} | R=${reward.toFixed(1)} | Pred=${predicted.toFixed(1)} | Weights Updated (Lat=${this.weights.latency.toFixed(2)})`);
   }
+
+  savePolicy() {
+    try {
+      const filePath = path.join(__dirname, 'policy.json');
+      const data = JSON.stringify(this.weights, null, 2);
+      fs.writeFileSync(filePath, data);
+      // console.log('[RL] Policy saved to policy.json'); // Optional logging
+    } catch (err) {
+      console.error('[RL] Failed to save policy:', err);
+    }
+  }
 }
 
 const agent = new RLAgent();
+// Update policy file every 5 seconds
+setInterval(() => agent.savePolicy(), 5000);
 
 // ---- stats endpoint ----
 app.get("/stats", (req, res) => {
