@@ -10,7 +10,9 @@
     "A": "nodemon --watch serverA/serverA.js --exec \"dotenv -e .env.serverA -- node serverA/serverA.js\"",
     "B": "nodemon --watch serverB/serverB.js --exec \"dotenv -e .env.serverB -- node serverB/serverB.js\"",
     "proxy": "nodemon --watch proxy/proxyserver.js --exec \"node proxy/proxyserver.js\"",
-    "all": "concurrently \"npm run A\" \"npm run B\" \"npm run proxy\""
+    "manual": "nodemon --watch proxy/manual.js --exec \"node proxy/manual.js\"",
+    "all": "concurrently \"npm run A\" \"npm run B\" \"npm run proxy\"",
+    "start-all": "concurrently \"npm run A\" \"npm run B\" \"npm run proxy\" \"npm run manual\""
   },
   "dependencies": {
     "@tensorflow/tfjs-node": "^4.22.0",
@@ -18,6 +20,7 @@
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
     "nodemon": "^3.1.11",
+    "tinybench": "^6.0.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {

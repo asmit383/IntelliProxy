@@ -169,6 +169,26 @@ class RLAgent {
       memory: -1.0,
       bias: 0.1
     };
+    this.updateBuffer = [];
+    this.batchSize = 5;
+
+    this.loadPolicy();
+  }
+
+  loadPolicy() {
+    try {
+      const filePath = path.join(__dirname, 'policy.json');
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        const savedWeights = JSON.parse(data);
+        this.weights = { ...this.weights, ...savedWeights };
+        console.log('[RL] Loaded policy from policy.json', this.weights);
+      } else {
+        console.log('[RL] No policy.json found, starting with default weights.');
+      }
+    } catch (err) {
+      console.error('[RL] Failed to load policy:', err.message);
+    }
   }
 
   getFeatures(server) {
@@ -231,18 +251,37 @@ class RLAgent {
     let reward = 10 - (durationMs / 100);
     if (isError) reward -= 50;
 
-    const f = this.getFeatures(server);
-    const predicted = this.predict(server);
-    const error = reward - predicted;
+    // Store experience
+    this.updateBuffer.push({ server, reward });
 
-    // Gradient Descent Step
-    for (const k in this.weights) {
-      if (f[k] !== undefined) {
-        this.weights[k] += this.learningRate * error * f[k];
+    // Only update after batchSize experiences
+    if (this.updateBuffer.length >= this.batchSize) {
+      this.batchUpdate();
+    }
+  }
+
+  batchUpdate() {
+    console.log(`[RL] Batch Update Triggered (${this.updateBuffer.length} items)`);
+
+    // Average Gradient Descent
+    for (const exp of this.updateBuffer) {
+      const { server, reward } = exp;
+      const f = this.getFeatures(server);
+      const predicted = this.predict(server);
+      const error = reward - predicted;
+
+      for (const k in this.weights) {
+        if (f[k] !== undefined) {
+          // Accumulate updates or update immediately? 
+          // Here we do standard SGD step for each item in batch
+          this.weights[k] += this.learningRate * error * f[k];
+        }
       }
     }
 
-    console.log(`[RL] Update: ${server.name} | R=${reward.toFixed(1)} | Pred=${predicted.toFixed(1)} | Weights Updated (Lat=${this.weights.latency.toFixed(2)})`);
+    // Clear buffer
+    this.updateBuffer = [];
+    console.log(`[RL] Weights Updated (Lat=${this.weights.latency.toFixed(2)})`);
   }
 
   savePolicy() {
