@@ -46,12 +46,9 @@ const BACKENDS = [
   },
 ];
 
-// ---- config / thresholds ----
-const MIN_PINGS = 5;               // don't trust loss until at least this many pings
-const SWITCH_THRESHOLD = 30;       // require new backend to be this many points better
-const SWITCH_COOLDOWN_MS = 1500;   // cooldown after switching (ms)
-let lastChosenName = null;
-let lastSwitchAt = 0;
+// ---- RL Configuration ----
+// No static thresholds, the agent learns policy.
+
 
 // ---- EWMA helper ----
 function ewma(old, value, alpha = 0.2) {
@@ -68,7 +65,7 @@ for (const b of BACKENDS) {
     onError(err, req, res) {
       console.error(`Proxy error for ${b.name}:`, err && err.message);
       if (!res.headersSent) res.statusCode = 502;
-      try { res.end("Bad gateway"); } catch (e) {}
+      try { res.end("Bad gateway"); } catch (e) { }
     }
   });
 }
@@ -79,7 +76,7 @@ function pingServer(server) {
 
   const req = http.get(server.url + "/health", (res) => {
     // consume body
-    res.on("data", () => {});
+    res.on("data", () => { });
     res.on("end", () => {
       const ms = Date.now() - start;
 
@@ -94,7 +91,7 @@ function pingServer(server) {
       server.lossPercent = Number.isFinite(server.lossEwma) ? server.lossEwma * 100 : 0;
 
       console.log(
-        `Ping ${server.name}: ${ms} ms | loss=${server.lossPercent.toFixed(2)}% | latEwma=${(server.latencyEwma||ms).toFixed(1)}ms`
+        `Ping ${server.name}: ${ms} ms | loss=${server.lossPercent.toFixed(2)}% | latEwma=${(server.latencyEwma || ms).toFixed(1)}ms`
       );
     });
   });
@@ -151,117 +148,103 @@ function normalize01(x, div) {
   return Math.tanh(Math.max(0, x / div)); // maps 0..inf -> 0..1 smoothly
 }
 
-function computeScore(server) {
-  
-  const wLatency = 1;   // 1 ms = 1 point
-  const wLoss    = 80;  
-  const wError   = 40;
-  const wLoad    = 2;   // active requests
-  const wQueue   = 12;  // queue pressure reduced
-  const wCpu     = 30;  // cpu pressure
-  const wMem     = 12;  // memory pressure
+// ---- RL Agent ----
+class RLAgent {
+  constructor() {
+    this.learningRate = 0.1;
+    this.epsilon = 0.2; // 20% exploration chance
 
-  // --- normalization divisors (tune to your environment) ---
-  const CPU_DIV = 100;                     // 100 ms busy -> ~tanh(1)
-  const MEM_DIV = 200 * 1024 * 1024;       // 200 MB -> ~tanh(1)
+    // Weights (Linear Q-Function). 
+    // We want to MAXIMIZE Reward. 
+    // Features like latency/error/load are "costs", so we expect negative weights.
+    this.weights = {
+      latency: -1.0,
+      loss: -5.0,
+      error: -20.0,
+      load: -1.0,
+      queue: -2.0,
+      cpu: -1.0,
+      memory: -1.0,
+      bias: 0.1
+    };
+  }
 
-  // latency: prefer EWMA
-  const latencyPart = Number.isFinite(server.latencyEwma)
-    ? server.latencyEwma
-    : (Number.isFinite(server.latency) ? server.latency : 10000);
+  getFeatures(server) {
+    const lat = server.latencyEwma || server.latency || 1000; // ms
 
-  // loss (0..1), gate until enough pings
-  const lossEwma = Number.isFinite(server.lossEwma) ? server.lossEwma : 0;
-  const effectiveLoss = (server.totalPings >= MIN_PINGS) ? lossEwma : 0;
-  const lossContribution = wLoss * Math.min(effectiveLoss, 0.98);
+    // Normalize features to roughly 0..1 range
+    const f = {
+      latency: Math.tanh(lat / 500),
+      loss: (server.lossPercent || 0) / 100,
+      error: server.errorRate || 0,
+      load: Math.tanh((server.activeRequests || 0) / 10),
+      queue: Math.tanh((server.queueEwma || 0) / 20),
+      cpu: normalize01(server.cpuBusyMs || 0, 100),
+      memory: normalize01(server.heapUsed || server.memRss || 0, 200 * 1024 * 1024),
+      bias: 1
+    };
+    return f;
+  }
 
-  // error rate (fraction -> percent inside)
-  const errorRate = Number.isFinite(server.errorRate) ? server.errorRate : 0;
-  const errorContribution = wError * (errorRate * 100);
+  predict(server) {
+    const f = this.getFeatures(server);
+    let q = 0;
+    for (const k in this.weights) {
+      if (f[k] !== undefined) q += this.weights[k] * f[k];
+    }
+    return q;
+  }
 
-  // active requests
-  const loadContribution = wLoad * server.activeRequests;
+  choose(backends) {
+    // 1. Explore
+    if (Math.random() < this.epsilon) {
+      const alive = backends.filter(b => Number.isFinite(b.latency));
+      const pool = alive.length > 0 ? alive : backends;
+      const choice = pool[Math.floor(Math.random() * pool.length)];
+      console.log(`[RL] Exploring: Selected ${choice.name}`);
+      return choice;
+    }
 
-  // queue (smoothed)
-  const queueNorm = Number.isFinite(server.queueEwma) ? Math.tanh(server.queueEwma / 50) : 0;
-  const queueContribution = wQueue * queueNorm;
+    // 2. Exploit
+    let best = backends[0];
+    let maxQ = -Infinity;
 
-  // CPU (normalize cpuBusyMs)
-  const cpuMs = Number.isFinite(server.cpuBusyMs) ? server.cpuBusyMs : 0;
-  const cpuNorm = normalize01(cpuMs, CPU_DIV); // 0..1
-  const cpuContribution = wCpu * cpuNorm;
-
-  // Memory (heapUsed preferred then rss)
-  const mem = Number.isFinite(server.heapUsed) ? server.heapUsed : (Number.isFinite(server.memRss) ? server.memRss : 0);
-  const memNorm = normalize01(mem, MEM_DIV);
-  const memContribution = wMem * memNorm;
-
-  const latencyContribution = wLatency * latencyPart;
-
-  const score =
-    latencyContribution +
-    lossContribution +
-    errorContribution +
-    loadContribution +
-    queueContribution +
-    cpuContribution +
-    memContribution;
-  console.log(
-    `Score ${server.name}: lat=${latencyContribution.toFixed(1)} + loss=${lossContribution.toFixed(1)} + ` +
-    `err=${errorContribution.toFixed(1)} + load=${loadContribution.toFixed(1)} + queue=${queueContribution.toFixed(1)} + ` +
-    `cpu=${cpuContribution.toFixed(1)} + mem=${memContribution.toFixed(1)} = total=${score.toFixed(1)}`
-  );  
-
-  return score;
-}
-
-
-// ---- selection with a SWITCH_THRESHOLD and cooldown to prevent thrash ----
-function getBestBackend() {
-  // consider backend alive if we have a finite latency or ewma
-  const alive = BACKENDS.filter((s) =>
-    Number.isFinite(s.latency) || Number.isFinite(s.latencyEwma)
-  );
-  const pool = alive.length > 0 ? alive : BACKENDS;
-
-  let best = pool[0];
-  let bestScore = computeScore(best);
-  let bestContrib = null;
-
-  for (const s of pool.slice(1)) {
-    const sScore = computeScore(s);
-    if (sScore < bestScore) {
-      // require margin to avoid switching for tiny differences
-      if (sScore < bestScore - SWITCH_THRESHOLD) {
-        best = s;
-        bestScore = sScore;
+    for (const b of backends) {
+      const q = this.predict(b);
+      // If q is higher, pick it
+      if (q > maxQ) {
+        maxQ = q;
+        best = b;
       }
     }
+
+    const f = this.getFeatures(best);
+    console.log(`[RL] Exploit: Selected ${best.name} (Q=${maxQ.toFixed(2)}). Features: lat=${f.latency.toFixed(2)}`);
+    return best;
   }
 
-  // cooldown: prevent switching too frequently
-  const now = Date.now();
-  if (lastChosenName && best.name !== lastChosenName && now - lastSwitchAt < SWITCH_COOLDOWN_MS) {
-    const prev = BACKENDS.find((b) => b.name === lastChosenName);
-    if (prev) {
-      best = prev;
-      bestScore = computeScore(best);
+  update(server, durationMs, isError) {
+    // Reward Calculation
+    // Base = 10. Subtract latency (penalty). Big penalty for error.
+    let reward = 10 - (durationMs / 100);
+    if (isError) reward -= 50;
+
+    const f = this.getFeatures(server);
+    const predicted = this.predict(server);
+    const error = reward - predicted;
+
+    // Gradient Descent Step
+    for (const k in this.weights) {
+      if (f[k] !== undefined) {
+        this.weights[k] += this.learningRate * error * f[k];
+      }
     }
-  } else if (best.name !== lastChosenName) {
-    lastChosenName = best.name;
-    lastSwitchAt = now;
+
+    console.log(`[RL] Update: ${server.name} | R=${reward.toFixed(1)} | Pred=${predicted.toFixed(1)} | Weights Updated (Lat=${this.weights.latency.toFixed(2)})`);
   }
-
-  console.log(
-    `Chosen backend: ${best.name} (${best.url}) | ` +
-    `lat=${best.latency === Infinity ? "INF" : best.latency + "ms"}, ` +
-    `latEwma=${best.latencyEwma ? best.latencyEwma.toFixed(1) + "ms" : "n/a"}, ` +
-    `loss=${best.lossPercent.toFixed(2)}%, errRate=${(best.errorRate * 100).toFixed(2)}%, ` +
-    `queueEwma=${(best.queueEwma||0).toFixed(2)}, active=${best.activeRequests}, score=${bestScore.toFixed(2)}`
-  );
-
-  return best;
 }
+
+const agent = new RLAgent();
 
 // ---- stats endpoint ----
 app.get("/stats", (req, res) => {
@@ -283,33 +266,40 @@ app.get("/stats", (req, res) => {
       queue: b.queue,
       queueEwma: b.queueEwma,
       alive: Number.isFinite(b.latency),
-      score: computeScore(b),
+      score: agent.predict(b),
     }))
   );
 });
 
 // ---- routing handler (reuse backend.proxy) ----
 app.use("/", (req, res, next) => {
-  const best = getBestBackend();
+  const best = agent.choose(BACKENDS);
   const target = best.url;
 
   best.activeRequests += 1;
   best.totalRequests += 1;
 
-  console.log(`Routing to: ${best.name} (${target})`);
+  const startTs = Date.now();
+  console.log(`[Proxy] Routing to: ${best.name} (${target})`);
 
   // use pre-created proxy middleware
   const proxy = best.proxy;
 
   // hook into response finish/error
   res.on("finish", () => {
+    const duration = Date.now() - startTs;
     best.activeRequests -= 1;
 
     // treat 5xx as error
+    let isError = false;
     if (res.statusCode >= 500) {
       best.errorRequests += 1;
+      isError = true;
     }
     best.errorRate = best.errorRequests / best.totalRequests;
+
+    // RL Update
+    agent.update(best, duration, isError);
   });
 
   res.on("close", () => {
