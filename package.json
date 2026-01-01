@@ -13,10 +13,12 @@
     "all": "concurrently \"npm run A\" \"npm run B\" \"npm run proxy\""
   },
   "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
