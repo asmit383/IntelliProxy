@@ -1,6 +1,6 @@
 # IntelliProxy
 
-IntelliProxy is a **smart, metric-driven load balancer** and reverse proxy built with Node.js. Unlike simple round-robin proxies, IntelliProxy continuously monitors the health and performance of backend servers to make intelligent routing decisions in real-time.
+IntelliProxy is a **Reinforcement Learning based proxy server** and load balancer built with Node.js. Unlike simple round-robin proxies, IntelliProxy uses an intelligent agent that continuously monitors the health (latency, loss) and performance (CPU, queue) of backend servers to make adaptive routing decisions in real-time.
 
 It routes traffic based on a composite score derived from latency, error rates, system load (CPU/Memory/Queue), and active requests, ensuring that your traffic always flows to the most capable instance.
 
@@ -88,9 +88,39 @@ The score is a weighted sum of several factors:
 ]
 ```
 
+## 🏗️ Architecture & Flow
+
+The system consists of the central IntelliProxy (acting as the RL agent) and multiple backend servers.
+
+```mermaid
+graph TD
+    Client((User Traffic)) -->|HTTP Request| Proxy[IntelliProxy<br/>(RL Load Balancer)]
+    
+    subgraph "Backend Ecosystem"
+        S1[Server A]
+        S2[Server B]
+    end
+
+    %% Metric Feedback Loop
+    S1 -.->|Metrics: CPU, Queue| Proxy
+    S2 -.->|Metrics: CPU, Queue| Proxy
+    Proxy -.->|Health Checks| S1
+    Proxy -.->|Health Checks| S2
+
+    %% Routing Decision
+    Proxy -->|Scores & Selects Best| S1
+    Proxy -->|Scores & Selects Best| S2
+    
+    S1 -->|Response| Proxy
+    S2 -->|Response| Proxy
+    Proxy -->|Final Response| Client
+```
+
 ## 📂 Project Structure
 
-*   `proxy/proxyserver.js`: The main proxy logic and scoring algorithm.
-*   `serverA/`: Simulation of Backend Server A.
-*   `serverB/`: Simulation of Backend Server B.
-*   `package.json`: Scripts and dependencies.
+*   **`proxy/proxyserver.js`**: The core **Reinforcement Learning Agent**. It maintains state (EWMA of latency, loss, queue size) for each backend and computes a dynamic score to decide routing.
+*   **`serverA/` & `serverB/`**: Simulated backend services that expose:
+    *   `/`: Main application route.
+    *   `/health`: Lightweight ping endpoint.
+    *   `/metrics`: JSON endpoint exposing internal state (CPU load, Queue length).
+*   **`package.json`**: Orchestrates the multi-process setup.
