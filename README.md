@@ -94,7 +94,7 @@ The system consists of the central IntelliProxy (acting as the RL agent) and mul
 
 ```mermaid
 graph TD
-    Client((User Traffic)) -->|HTTP Request| Proxy[IntelliProxy<br/>(RL Load Balancer)]
+    Client((User Traffic)) -->|HTTP Request| Proxy["IntelliProxy<br/>(RL Load Balancer)"]
     
     subgraph "Backend Ecosystem"
         S1[Server A]
