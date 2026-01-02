@@ -124,3 +124,4 @@ graph TD
     *   `/health`: Lightweight ping endpoint.
     *   `/metrics`: JSON endpoint exposing internal state (CPU load, Queue length).
 *   **`package.json`**: Orchestrates the multi-process setup.
+![alt text](image-1.png)
