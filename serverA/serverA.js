@@ -10,10 +10,10 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 // ---- Gilbert-Elliott parameters (bursty loss model) ----
 // You can override via env vars when launching each instance
 let GE_state = "G"; // 'G' = good, 'B' = bad
-const P_G_TO_B   = parseFloat(process.env.P_G_TO_B   || 0.03); // prob G->B
-const P_B_TO_G   = parseFloat(process.env.P_B_TO_G   || 0.08); // prob B->G
-const LOSS_IN_G  = parseFloat(process.env.LOSS_IN_G  || 0.01); // loss prob in Good
-const LOSS_IN_B  = parseFloat(process.env.LOSS_IN_B  || 0.45); // loss prob in Bad
+const P_G_TO_B = parseFloat(process.env.P_G_TO_B || 0.03); // prob G->B
+const P_B_TO_G = parseFloat(process.env.P_B_TO_G || 0.08); // prob B->G
+const LOSS_IN_G = parseFloat(process.env.LOSS_IN_G || 0.01); // loss prob in Good
+const LOSS_IN_B = parseFloat(process.env.LOSS_IN_B || 0.45); // loss prob in Bad
 
 // ---- Load / queue simulation ----
 let queueLen = 0;
@@ -26,9 +26,9 @@ setInterval(() => {
 }, 200);
 
 // ---- Slow/error probabilities and CPU work ----
-const ERR_RATE   = parseFloat(process.env.ERR_RATE   || 0.03); // 5xx probability
-const SLOW_RATE  = parseFloat(process.env.SLOW_RATE  || 0.08); // slow response probability
-const SLOW_MS    = parseInt(process.env.SLOW_MS || "600", 10); // slow response time (ms)
+const ERR_RATE = parseFloat(process.env.ERR_RATE || 0.03); // 5xx probability
+const SLOW_RATE = parseFloat(process.env.SLOW_RATE || 0.08); // slow response probability
+const SLOW_MS = parseInt(process.env.SLOW_MS || "600", 10); // slow response time (ms)
 const CPU_LOAD_MS = parseInt(process.env.CPU_LOAD_MS || "0", 10); // busy-spin ms per request
 const OVERLOAD_DROP_MULTIPLIER = parseFloat(process.env.OVERLOAD_DROP_MULTIPLIER || 0.6); // scale overload drop
 
